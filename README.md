@@ -1,6 +1,6 @@
 # wick
 
-Claude Code token consumption monitor, written in Go. A Go reimplementation of the [original wick (Node.js)](https://github.com/MateusCastro2203/wick), using [Cobra](https://github.com/spf13/cobra) (CLI framework), [Lipgloss](https://github.com/charmbracelet/lipgloss) (styling), and [Bubble Tea](https://github.com/charmbracelet/bubbletea) (live TUI).
+Claude Code token consumption monitor, written in Go, using [Cobra](https://github.com/spf13/cobra) (CLI framework), [Lipgloss](https://github.com/charmbracelet/lipgloss) (styling), and [Bubble Tea](https://github.com/charmbracelet/bubbletea) (live TUI).
 
 Reads the JSONL transcript that Claude Code itself already writes per session (`~/.claude/projects/<project>/<session>.jsonl`) and shows: total tokens spent, ranking of which prompt cost the most, breakdown by skill/subagent, and % of context window used. No hooks, no external API, no auth — it just reads the file that already exists on disk.
 
@@ -141,4 +141,3 @@ internal/
 └── tui/
     └── watch.go             # live dashboard (Bubble Tea + Lipgloss)
 ```
-
