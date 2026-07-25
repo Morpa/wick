@@ -137,7 +137,7 @@ func (m model) View() string {
 	if m.viewModel == nil {
 		return errStyle.Render(
 			lipgloss.JoinVertical(lipgloss.Left,
-				warnStyle.Render("⚠ token-monitor"),
+				warnStyle.Render("⚠ wick"),
 				"",
 				dimStyle.Render("No active session found."),
 				dimStyle.Render("Run this command from within a project"),

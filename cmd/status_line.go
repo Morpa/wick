@@ -30,18 +30,18 @@ Produces a compact line like:
 	Run: func(_ *cobra.Command, _ []string) {
 		var input statusLineInput
 		if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-			fmt.Println("token-monitor: no session")
+			fmt.Println("wick: no session")
 			return
 		}
 
 		if input.TranscriptPath == "" {
-			fmt.Println("token-monitor: no session")
+			fmt.Println("wick: no session")
 			return
 		}
 
 		events, warnings := session.ParseSession(input.TranscriptPath)
 		if len(events) == 0 {
-			fmt.Println("token-monitor: no session")
+			fmt.Println("wick: no session")
 			return
 		}
 

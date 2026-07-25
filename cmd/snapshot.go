@@ -39,7 +39,7 @@ The command reads the active session's JSONL transcript from ~/.claude/projects/
 		projectDir := filepath.Join(home, ".claude", "projects", encoded)
 		sessionFile, ok := session.FindActiveSession(projectDir)
 		if !ok {
-			fmt.Printf("token-monitor: no session found in %s\n", projectDir)
+			fmt.Printf("wick: no session found in %s\n", projectDir)
 			fmt.Println("Run this command from inside a project with an active Claude Code session.")
 			return
 		}

@@ -35,7 +35,7 @@ type ViewModel struct {
 
 // BuildViewModel converts computed totals into a display-ready ViewModel.
 func BuildViewModel(t session.Totals, sessionID, projectLabel string, warnings int) ViewModel {
-	header := fmt.Sprintf("token-monitor — %s (%s)", projectLabel, sessionID)
+	header := fmt.Sprintf("wick — %s (%s)", projectLabel, sessionID)
 	totalTokens := FormatTokenCount(t.Usage.InputTokens + t.Usage.OutputTokens +
 		t.Usage.CacheCreationInput + t.Usage.CacheReadInputTokens)
 	breakdown := fmt.Sprintf("in %s · out %s · cache-w %s · cache-r %s",

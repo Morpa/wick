@@ -90,7 +90,7 @@ wick setup --force   # overwrite existing statusLine
 
 This:
 
-1. Creates the skill directory at `~/.claude/skills/token-monitor`
+1. Creates the skill directory at `~/.claude/skills/wick`
 2. Copies the `/tokens` command to `~/.claude/commands/tokens.md`
 3. Registers the `statusLine` in `~/.claude/settings.json`
 

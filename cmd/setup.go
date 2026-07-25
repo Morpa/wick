@@ -16,7 +16,7 @@ var setupCmd = &cobra.Command{
 	Short: "Configures integration with Claude Code (skill, /tokens, statusLine)",
 	Long: `Configures wick's integration with Claude Code:
 
-1. Creates a symlink for the skill at ~/.claude/skills/token-monitor
+1. Creates a symlink for the skill at ~/.claude/skills/wick
 2. Copies the /tokens command to ~/.claude/commands/tokens.md
 3. Registers the statusLine in ~/.claude/settings.json
 
@@ -30,7 +30,7 @@ Use --force to overwrite an existing statusLine.
 		}
 
 		claudeHome := filepath.Join(home, ".claude")
-		skillDir := filepath.Join(claudeHome, "skills", "token-monitor")
+		skillDir := filepath.Join(claudeHome, "skills", "wick")
 		commandFile := filepath.Join(claudeHome, "commands", "tokens.md")
 		settingsFile := filepath.Join(claudeHome, "settings.json")
 
@@ -54,11 +54,11 @@ Use --force to overwrite an existing statusLine.
 		}
 		skillMDFile := filepath.Join(skillDir, "SKILL.md")
 		skillMD := fmt.Sprintf(`---
-name: token-monitor
+name: wick
 description: Shows token consumption for the current Claude Code session — total, most expensive prompt ranking, breakdown by skill/subagent, and %% of context window.
 ---
 
-# token-monitor
+# wick
 
 Claude Code skill for monitoring token consumption per session.
 
