@@ -67,10 +67,9 @@ type tickMsg struct{}
 
 // Model
 type model struct {
-	cwd         string
-	viewModel   *format.ViewModel
-	sessionFile string
-	width       int
+	cwd       string
+	viewModel *format.ViewModel
+	width     int
 	height      int
 	err         string
 }
@@ -83,10 +82,6 @@ func NewModel(cwd string) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return m.loadAndTick()
-}
-
-func (m model) loadAndTick() tea.Cmd {
 	m.viewModel = m.loadViewModel()
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return tickMsg{}
@@ -104,7 +99,6 @@ func (m model) loadViewModel() *format.ViewModel {
 	if !ok {
 		return nil
 	}
-	m.sessionFile = sessionFile
 	events, warnings := session.ParseSession(sessionFile)
 	turns := session.GroupIntoTurns(events)
 	totals := session.ComputeTotals(events, turns)
@@ -123,7 +117,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		return m, m.loadAndTick()
+		m.viewModel = m.loadViewModel()
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return tickMsg{}
+		})
 
 	case tea.KeyMsg:
 		if msg.String() == "q" || msg.String() == "ctrl+c" {
