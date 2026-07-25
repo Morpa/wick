@@ -1,0 +1,275 @@
+package tui
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Morpa/wick/internal/format"
+	"github.com/Morpa/wick/internal/session"
+)
+
+// Styles
+var (
+	statPanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("14")).
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(56)
+
+	topPanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("5")).
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(56)
+
+	skillPanelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("4")).
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(56)
+
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("14"))
+
+	totalStyle = lipgloss.NewStyle().Bold(true)
+
+	dimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245"))
+
+	greenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	redStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+
+	headerTop = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
+	headerSkl = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
+
+	errStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("11")).
+			PaddingLeft(1).
+			PaddingRight(1).
+			Width(56)
+)
+
+// Messages
+type tickMsg struct{}
+
+// Model
+type model struct {
+	cwd         string
+	viewModel   *format.ViewModel
+	sessionFile string
+	width       int
+	height      int
+	err         string
+}
+
+// NewModel creates the initial Bubble Tea model for the watch dashboard.
+func NewModel(cwd string) model {
+	return model{
+		cwd: cwd,
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return m.loadAndTick()
+}
+
+func (m model) loadAndTick() tea.Cmd {
+	m.viewModel = m.loadViewModel()
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return tickMsg{}
+	})
+}
+
+func (m model) loadViewModel() *format.ViewModel {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	encoded := session.EncodeProjectDir(m.cwd)
+	projectDir := filepath.Join(home, ".claude", "projects", encoded)
+	sessionFile, ok := session.FindActiveSession(projectDir)
+	if !ok {
+		return nil
+	}
+	m.sessionFile = sessionFile
+	events, warnings := session.ParseSession(sessionFile)
+	turns := session.GroupIntoTurns(events)
+	totals := session.ComputeTotals(events, turns)
+	sessionID := filepath.Base(sessionFile)
+	// strip .jsonl extension
+	sessionID = sessionID[:len(sessionID)-6]
+	vm := format.BuildViewModel(totals, sessionID, filepath.Base(m.cwd), warnings)
+	return &vm
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case tickMsg:
+		return m, m.loadAndTick()
+
+	case tea.KeyMsg:
+		if msg.String() == "q" || msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m model) View() string {
+	if m.viewModel == nil {
+		return errStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				warnStyle.Render("⚠ token-monitor"),
+				"",
+				dimStyle.Render("No active session found."),
+				dimStyle.Render("Run this command from within a project"),
+				dimStyle.Render("with an active Claude Code session."),
+			),
+		) + "\n"
+	}
+
+	vm := m.viewModel
+
+	// ── Stats panel ──
+	statsLines := []string{
+		titleStyle.Render(vm.Header),
+		"",
+		totalStyle.Render("🔥 Total: " + vm.TotalTokens + " tok"),
+		dimStyle.Render("   " + vm.Breakdown),
+		"",
+	}
+
+	// Context bar
+	if vm.ContextPercentage >= 0 {
+		bar := ctxBar(vm.ContextPercentage, 10)
+		ctxColor := greenStyle
+		label := "🧠 Context"
+		switch vm.ContextSeverity {
+		case "danger":
+			ctxColor = redStyle
+			label = "🔥 Context"
+		case "warn":
+			ctxColor = yellowStyle
+			label = "⚠ Context"
+		}
+		statsLines = append(statsLines,
+			ctxColor.Render(fmt.Sprintf("%s: %.1f%% used", label, vm.ContextPercentage)),
+		)
+		if vm.ContextDetail != "" {
+			statsLines = append(statsLines,
+				dimStyle.Render(fmt.Sprintf("   %s / %s", bar, vm.ContextDetail)),
+			)
+		}
+		statsLines = append(statsLines,
+			dimStyle.Render(fmt.Sprintf("     %s", vm.ContextDetail)),
+		)
+	} else {
+		statsLines = append(statsLines, dimStyle.Render("🧠 Context: no data available yet"))
+	}
+	statsLines = append(statsLines, "")
+
+	if len(vm.TopRows) > 0 {
+		statsLines = append(statsLines,
+			dimStyle.Render(fmt.Sprintf("🏆 Top: \"%s\"", vm.TopRows[0].Preview)),
+		)
+	} else {
+		statsLines = append(statsLines, dimStyle.Render("🏆 Top: (no prompts have been recorded yet)"))
+	}
+
+	statsPanel := statPanelStyle.Render(lipgloss.JoinVertical(lipgloss.Left, statsLines...))
+
+	// ── Top prompts ──
+	var topLines []string
+	topLines = append(topLines, headerTop.Render("🏆 Top prompts"))
+	if len(vm.TopRows) > 0 {
+		for _, row := range vm.TopRows {
+			preview := truncate(row.Preview, 45)
+			topLines = append(topLines,
+				fmt.Sprintf(" %d. %7s  \"%s\"", row.Rank, row.Tokens, preview),
+			)
+		}
+	} else {
+		topLines = append(topLines, dimStyle.Render(" (no prompts have been recorded yet)"))
+	}
+	topPanel := topPanelStyle.Render(lipgloss.JoinVertical(lipgloss.Left, topLines...))
+
+	// ── Skill breakdown ──
+	var skillLines []string
+	skillLines = append(skillLines, headerSkl.Render("🧩 By skill/agent"))
+	if len(vm.SkillRows) > 0 {
+		for _, row := range vm.SkillRows {
+			skillLines = append(skillLines,
+				fmt.Sprintf(" %-12s %s", row.Skill, row.Tokens),
+			)
+		}
+	} else {
+		skillLines = append(skillLines, dimStyle.Render(" (no data)"))
+	}
+	skillPanel := skillPanelStyle.Render(lipgloss.JoinVertical(lipgloss.Left, skillLines...))
+
+	// ── Warnings ──
+	var content []string
+	content = append(content, statsPanel, "", topPanel, "", skillPanel)
+
+	if vm.WarningsLine != "" {
+		content = append(content, "", warnStyle.Render("⚠ "+vm.WarningsLine))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, content...) + "\n"
+}
+
+// ctxBar renders a simple progress bar (e.g. ██████░░░░).
+func ctxBar(pct float64, segs int) string {
+	filled := min(int(pct/100*float64(segs)), segs)
+	filled = max(filled, 0)
+	empty := segs - filled
+	fillCh := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render(repeat("█", filled))
+	emptCh := lipgloss.NewStyle().Foreground(lipgloss.Color("236")).Render(repeat("░", empty))
+
+	return fillCh + emptCh
+}
+
+func repeat(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	for range n {
+		b.WriteString(s)
+	}
+	return b.String()
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
+
+// RunWatch starts the Bubble Tea live dashboard.
+func RunWatch(cwd string) {
+	p := tea.NewProgram(NewModel(cwd), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "tokmon: %v\n", err)
+		os.Exit(1)
+	}
+}
