@@ -2,11 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/Morpa/wick/internal/format"
 	"github.com/Morpa/wick/internal/session"
 	"github.com/spf13/cobra"
-	"os"
-	"path/filepath"
 )
 
 var snapshotCmd = &cobra.Command{

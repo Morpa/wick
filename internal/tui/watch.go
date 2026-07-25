@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Morpa/wick/internal/format"
 	"github.com/Morpa/wick/internal/session"
@@ -68,13 +68,16 @@ type tickMsg struct{}
 
 // Model
 type model struct {
-	cwd       string
-	viewModel *format.ViewModel
-	loaded    bool
-	width     int
-	height    int
-	err       string
-	viewport  viewport.Model
+	cwd            string
+	viewModel      *format.ViewModel
+	loaded         bool
+	width          int
+	height         int
+	err            string
+	scrollY        int
+	scrollX        int
+	contentLines   []string // cached split lines for scrolling (set in Update, read in View)
+	maxLineLen     int      // longest line width for horizontal scroll
 }
 
 // NewModel creates the initial Bubble Tea model for the watch dashboard.
@@ -116,77 +119,132 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = msg.Width
-		m.viewport.Height = msg.Height - 1 // leave room for help line
+		m.scrollY = 0
+		m.scrollX = 0
 		return m, nil
 
 	case tickMsg:
 		m.loaded = true
 		m.viewModel = m.loadViewModel()
+		if m.viewModel != nil {
+			m.rebuildContent()
+		}
+		m.scrollY = 0
+		m.scrollX = 0
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return tickMsg{}
 		})
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
+		if msg.String() == "q" || msg.String() == "ctrl+c" {
 			return m, tea.Quit
+		}
+
+		visibleLines := m.height - 1 // -1 for help line
+
+		// max vertical scroll
+		maxY := len(m.contentLines) - visibleLines
+		if maxY < 0 {
+			maxY = 0
+		}
+		// max horizontal scroll (half terminal width by default)
+		contentWidth := m.width - 4 // account for borders
+		maxX := m.maxLineLen - contentWidth
+		if maxX < 0 {
+			maxX = 0
+		}
+
+		switch msg.String() {
 		case "up", "k":
-			m.viewport.LineUp(1)
-			return m, nil
+			if m.scrollY > 0 {
+				m.scrollY--
+			}
 		case "down", "j":
-			m.viewport.LineDown(1)
-			return m, nil
+			if m.scrollY < maxY {
+				m.scrollY++
+			}
+		case "left", "h":
+			if m.scrollX > 0 {
+				m.scrollX -= 8
+				if m.scrollX < 0 {
+					m.scrollX = 0
+				}
+			}
+		case "right", "l":
+			if m.scrollX < maxX {
+				m.scrollX += 8
+				if m.scrollX > maxX {
+					m.scrollX = maxX
+				}
+			}
 		case "pgup":
-			m.viewport.HalfViewUp()
-			return m, nil
+			m.scrollY -= visibleLines
+			if m.scrollY < 0 {
+				m.scrollY = 0
+			}
 		case "pgdown", " ":
-			m.viewport.HalfViewDown()
-			return m, nil
+			m.scrollY += visibleLines
+			if m.scrollY > maxY {
+				m.scrollY = maxY
+			}
 		case "home":
-			m.viewport.GotoTop()
-			return m, nil
+			m.scrollY = 0
 		case "end":
-			m.viewport.GotoBottom()
-			return m, nil
+			m.scrollY = maxY
 		}
 
 	case tea.MouseMsg:
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
-			m.viewport.LineUp(3)
-			return m, nil
-		}
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
-			m.viewport.LineDown(3)
-			return m, nil
+		if msg.Action == tea.MouseActionPress {
+			visibleLines := m.height - 1
+			maxY := len(m.contentLines) - visibleLines
+			if maxY < 0 {
+				maxY = 0
+			}
+
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				if msg.Shift {
+					// horizontal scroll (shift + wheel)
+					if m.scrollX > 0 {
+						m.scrollX -= 8
+						if m.scrollX < 0 {
+							m.scrollX = 0
+						}
+					}
+				} else {
+					if m.scrollY > 0 {
+						m.scrollY -= 3
+						if m.scrollY < 0 {
+							m.scrollY = 0
+						}
+					}
+				}
+			case tea.MouseButtonWheelDown:
+				if msg.Shift {
+					contentWidth := m.width - 4
+					maxX := m.maxLineLen - contentWidth
+					if maxX < 0 {
+						maxX = 0
+					}
+					m.scrollX += 8
+					if m.scrollX > maxX {
+						m.scrollX = maxX
+					}
+				} else {
+					m.scrollY += 3
+					if m.scrollY > maxY {
+						m.scrollY = maxY
+					}
+				}
+			}
 		}
 	}
 	return m, nil
 }
 
-func (m model) View() string {
-	if m.viewModel == nil {
-		if !m.loaded {
-			return errStyle.Render(
-				lipgloss.JoinVertical(lipgloss.Left,
-					warnStyle.Render("⏳ wick"),
-					"",
-					dimStyle.Render("Loading…"),
-					dimStyle.Render("Looking for active Claude Code session."),
-				),
-			) + "\n"
-		}
-		return errStyle.Render(
-			lipgloss.JoinVertical(lipgloss.Left,
-				warnStyle.Render("⚠ wick"),
-				"",
-				dimStyle.Render("No active session found."),
-				dimStyle.Render("Run this command from within a project"),
-				dimStyle.Render("with an active Claude Code session."),
-			),
-		) + "\n"
-	}
-
+// rebuildContent builds the rendered content from the view model and caches it
+// for scrolling. Called from Update, where model changes persist.
+func (m *model) rebuildContent() {
 	vm := m.viewModel
 
 	// ── Stats panel ──
@@ -266,7 +324,7 @@ func (m model) View() string {
 	}
 	skillPanel := skillPanelStyle.Width(m.width - 4).Render(lipgloss.JoinVertical(lipgloss.Left, skillLines...))
 
-	// ── Warnings ──
+	// ── Build full content ──
 	var content []string
 	content = append(content, statsPanel, "", topPanel, "", skillPanel)
 
@@ -274,12 +332,91 @@ func (m model) View() string {
 		content = append(content, "", warnStyle.Render("⚠ "+vm.WarningsLine))
 	}
 
-	body := lipgloss.JoinVertical(lipgloss.Left, content...)
-	m.viewport.SetContent(body)
+	fullContent := lipgloss.JoinVertical(lipgloss.Left, content...)
 
-	helpLine := helpStyle.Render("↑↓ scroll  j/k  pgup/pgdn  q quit")
+	m.contentLines = strings.Split(fullContent, "\n")
+	m.maxLineLen = 0
+	for _, line := range m.contentLines {
+		w := ansi.StringWidth(line)
+		if w > m.maxLineLen {
+			m.maxLineLen = w
+		}
+	}
+}
 
-	return m.viewport.View() + "\n" + helpLine
+func (m model) View() string {
+	if m.viewModel == nil {
+		if !m.loaded {
+			return errStyle.Render(
+				lipgloss.JoinVertical(lipgloss.Left,
+					warnStyle.Render("⏳ wick"),
+					"",
+					dimStyle.Render("Loading…"),
+					dimStyle.Render("Looking for active Claude Code session."),
+				),
+			) + "\n"
+		}
+		return errStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				warnStyle.Render("⚠ wick"),
+				"",
+				dimStyle.Render("No active session found."),
+				dimStyle.Render("Run this command from within a project"),
+				dimStyle.Render("with an active Claude Code session."),
+			),
+		) + "\n"
+	}
+
+	// Clamp scroll offsets
+	visibleLines := m.height - 1
+	maxY := len(m.contentLines) - visibleLines
+	if maxY < 0 {
+		maxY = 0
+	}
+	if m.scrollY > maxY {
+		m.scrollY = maxY
+	}
+	if m.scrollY < 0 {
+		m.scrollY = 0
+	}
+	contentWidth := m.width - 4
+	maxX := m.maxLineLen - contentWidth
+	if maxX < 0 {
+		maxX = 0
+	}
+	if m.scrollX > maxX {
+		m.scrollX = maxX
+	}
+	if m.scrollX < 0 {
+		m.scrollX = 0
+	}
+
+	// Show only the visible portion (vertical)
+	top := m.scrollY
+	bottom := top + visibleLines
+	if bottom > len(m.contentLines) {
+		bottom = len(m.contentLines)
+	}
+
+	visibleLinesSlice := m.contentLines[top:bottom]
+
+	// Apply horizontal scroll
+	var trimmed []string
+	for _, line := range visibleLinesSlice {
+		w := ansi.StringWidth(line)
+		if m.scrollX > 0 && m.scrollX < w {
+			trimmed = append(trimmed, ansi.Truncate(ansi.Cut(line, m.scrollX, w), contentWidth, ""))
+		} else if m.scrollX >= w {
+			trimmed = append(trimmed, "")
+		} else {
+			trimmed = append(trimmed, ansi.Truncate(line, contentWidth, ""))
+		}
+	}
+
+	visible := strings.Join(trimmed, "\n")
+	helpLine := helpStyle.Render("↑↓ scroll  h/l horiz  pgup/pgdn  q quit")
+
+	return visible + "\n" + helpLine
 }
 
 // ctxBar renders a simple progress bar (e.g. ██████░░░░).

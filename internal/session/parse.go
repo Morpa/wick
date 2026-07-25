@@ -31,12 +31,12 @@ type Message struct {
 
 // RawEvent is the top-level JSONL line structure.
 type RawEvent struct {
-	UUID             string   `json:"uuid"`
-	ParentUUID       string   `json:"parentUuid"`
-	Timestamp        string   `json:"timestamp"`
-	IsSidechain      bool     `json:"isSidechain"`
-	AttributionSkill string   `json:"attributionSkill"`
-	Message          *Message `json:"message"`
+	UUID             string          `json:"uuid"`
+	ParentUUID       string          `json:"parentUuid"`
+	Timestamp        string          `json:"timestamp"`
+	IsSidechain      bool            `json:"isSidechain"`
+	AttributionSkill string          `json:"attributionSkill"`
+	Message          *Message        `json:"message"`
 	ToolUseResult    json.RawMessage `json:"toolUseResult"`
 }
 
