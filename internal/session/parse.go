@@ -37,7 +37,7 @@ type RawEvent struct {
 	IsSidechain      bool     `json:"isSidechain"`
 	AttributionSkill string   `json:"attributionSkill"`
 	Message          *Message `json:"message"`
-	ToolUseResult    bool     `json:"toolUseResult"`
+	ToolUseResult    json.RawMessage `json:"toolUseResult"`
 }
 
 // NormalizedEvent is a flattened, cleaned-up representation of one transcript
@@ -61,7 +61,7 @@ func isRealUserMessage(e RawEvent) bool {
 	if e.Message == nil || e.Message.Role != "user" {
 		return false
 	}
-	if e.ToolUseResult {
+	if isToolResult(e.ToolUseResult) {
 		return false
 	}
 	if e.Message.Content == nil {
@@ -69,6 +69,21 @@ func isRealUserMessage(e RawEvent) bool {
 	}
 
 	return hasRealTextContent(*e.Message.Content)
+}
+
+// isToolResult returns true when toolUseResult is present and truthy.
+// Claude Code writes toolUseResult as a bool, string, or object — all are
+// treated as "yes, this is a tool result" except false/absent/null.
+func isToolResult(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var b bool
+	if json.Unmarshal(raw, &b) == nil {
+		return b
+	}
+	// Non-bool non-null values (string, object) are always truthy.
+	return true
 }
 
 func hasRealTextContent(raw json.RawMessage) bool {
