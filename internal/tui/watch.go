@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -20,22 +21,19 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("14")).
 			PaddingLeft(1).
-			PaddingRight(1).
-			Width(56)
+			PaddingRight(1)
 
 	topPanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("5")).
 			PaddingLeft(1).
-			PaddingRight(1).
-			Width(56)
+			PaddingRight(1)
 
 	skillPanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("4")).
 			PaddingLeft(1).
-			PaddingRight(1).
-			Width(56)
+			PaddingRight(1)
 
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -58,8 +56,11 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("11")).
 			PaddingLeft(1).
-			PaddingRight(1).
-			Width(56)
+			PaddingRight(1)
+
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Padding(0, 1)
 )
 
 // Messages
@@ -71,8 +72,9 @@ type model struct {
 	viewModel *format.ViewModel
 	loaded    bool
 	width     int
-	height      int
-	err         string
+	height    int
+	err       string
+	viewport  viewport.Model
 }
 
 // NewModel creates the initial Bubble Tea model for the watch dashboard.
@@ -114,6 +116,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.viewport.Width = msg.Width
+		m.viewport.Height = msg.Height - 1 // leave room for help line
 		return m, nil
 
 	case tickMsg:
@@ -124,8 +128,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case tea.KeyMsg:
-		if msg.String() == "q" || msg.String() == "ctrl+c" {
+		switch msg.String() {
+		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "up", "k":
+			m.viewport.LineUp(1)
+			return m, nil
+		case "down", "j":
+			m.viewport.LineDown(1)
+			return m, nil
+		case "pgup":
+			m.viewport.HalfViewUp()
+			return m, nil
+		case "pgdown", " ":
+			m.viewport.HalfViewDown()
+			return m, nil
+		case "home":
+			m.viewport.GotoTop()
+			return m, nil
+		case "end":
+			m.viewport.GotoBottom()
+			return m, nil
+		}
+
+	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
+			m.viewport.LineUp(3)
+			return m, nil
+		}
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
+			m.viewport.LineDown(3)
+			return m, nil
 		}
 	}
 	return m, nil
@@ -202,7 +235,7 @@ func (m model) View() string {
 		statsLines = append(statsLines, dimStyle.Render("🏆 Top: (no prompts have been recorded yet)"))
 	}
 
-	statsPanel := statPanelStyle.Render(lipgloss.JoinVertical(lipgloss.Left, statsLines...))
+	statsPanel := statPanelStyle.Width(m.width - 4).Render(lipgloss.JoinVertical(lipgloss.Left, statsLines...))
 
 	// ── Top prompts ──
 	var topLines []string
@@ -217,7 +250,7 @@ func (m model) View() string {
 	} else {
 		topLines = append(topLines, dimStyle.Render(" (no prompts have been recorded yet)"))
 	}
-	topPanel := topPanelStyle.Render(lipgloss.JoinVertical(lipgloss.Left, topLines...))
+	topPanel := topPanelStyle.Width(m.width - 4).Render(lipgloss.JoinVertical(lipgloss.Left, topLines...))
 
 	// ── Skill breakdown ──
 	var skillLines []string
@@ -231,7 +264,7 @@ func (m model) View() string {
 	} else {
 		skillLines = append(skillLines, dimStyle.Render(" (no data)"))
 	}
-	skillPanel := skillPanelStyle.Render(lipgloss.JoinVertical(lipgloss.Left, skillLines...))
+	skillPanel := skillPanelStyle.Width(m.width - 4).Render(lipgloss.JoinVertical(lipgloss.Left, skillLines...))
 
 	// ── Warnings ──
 	var content []string
@@ -241,7 +274,12 @@ func (m model) View() string {
 		content = append(content, "", warnStyle.Render("⚠ "+vm.WarningsLine))
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, content...) + "\n"
+	body := lipgloss.JoinVertical(lipgloss.Left, content...)
+	m.viewport.SetContent(body)
+
+	helpLine := helpStyle.Render("↑↓ scroll  j/k  pgup/pgdn  q quit")
+
+	return m.viewport.View() + "\n" + helpLine
 }
 
 // ctxBar renders a simple progress bar (e.g. ██████░░░░).
@@ -275,9 +313,9 @@ func truncate(s string, max int) string {
 
 // RunWatch starts the Bubble Tea live dashboard.
 func RunWatch(cwd string) {
-	p := tea.NewProgram(NewModel(cwd), tea.WithAltScreen())
+	p := tea.NewProgram(NewModel(cwd), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "tokmon: %v\n", err)
+		fmt.Fprintf(os.Stderr, "wick: %v\n", err)
 		os.Exit(1)
 	}
 }
