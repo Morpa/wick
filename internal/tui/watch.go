@@ -69,6 +69,7 @@ type tickMsg struct{}
 type model struct {
 	cwd       string
 	viewModel *format.ViewModel
+	loaded    bool
 	width     int
 	height      int
 	err         string
@@ -82,8 +83,7 @@ func NewModel(cwd string) model {
 }
 
 func (m model) Init() tea.Cmd {
-	m.viewModel = m.loadViewModel()
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+	return tea.Tick(0, func(time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
@@ -117,6 +117,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		m.loaded = true
 		m.viewModel = m.loadViewModel()
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return tickMsg{}
@@ -132,6 +133,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if m.viewModel == nil {
+		if !m.loaded {
+			return errStyle.Render(
+				lipgloss.JoinVertical(lipgloss.Left,
+					warnStyle.Render("⏳ wick"),
+					"",
+					dimStyle.Render("Loading…"),
+					dimStyle.Render("Looking for active Claude Code session."),
+				),
+			) + "\n"
+		}
 		return errStyle.Render(
 			lipgloss.JoinVertical(lipgloss.Left,
 				warnStyle.Render("⚠ wick"),
